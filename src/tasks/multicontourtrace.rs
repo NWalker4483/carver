@@ -7,28 +7,25 @@ use crate::stl_operations::get_bounds;
 use super::ContourTrace;
 
 pub struct MultiContourTrace {
-    start_height: f32,
-    end_height: f32,
+    start_position: Point3<f32>,
+    end_position: Point3<f32>,
     num_layers: usize,
     num_rays: usize,
-    ray_length: f32,
     keypoints: Vec<Keypoint>,
 }
 
 impl MultiContourTrace {
     pub fn new(
-        start_height: f32,
-        end_height: f32,
+        start_position: Point3<f32>,
+        end_position: Point3<f32>,
         num_layers: usize,
         num_rays: usize,
-        ray_length: f32,
     ) -> MultiContourTrace {
         MultiContourTrace {
-            start_height,
-            end_height,
+            start_position,
+            end_position,
             num_layers,
             num_rays,
-            ray_length,
             keypoints: Vec::new(),
         }
     }
@@ -36,18 +33,20 @@ impl MultiContourTrace {
 
 impl CAMTask for MultiContourTrace {
     fn process(&mut self, mesh: &IndexedMesh) -> Result<(), CAMError> {
-        println!("Processing multi-contour trace from {} to {} with {} layers",
-                 self.start_height, self.end_height, self.num_layers);
-
-        let (min_bound, max_bound) = get_bounds(mesh).map_err(|e| CAMError::ProcessingError(e.to_string()))?;
-        let height_step = (self.end_height - self.start_height) / self.num_layers as f32;
+        println!("Processing multi-contour trace from {:?} to {:?} with {} layers",
+                 self.start_position, self.end_position, self.num_layers);
 
         self.keypoints.clear();
 
+        let direction = self.end_position - self.start_position;
+        let normal = direction.normalize();
+
         for i in 0..=self.num_layers {
-            let layer_height = self.start_height + i as f32 * height_step;
-            let mut contour_trace = ContourTrace::new(self.num_rays, self.ray_length, layer_height);
-            
+            let t = i as f32 / self.num_layers as f32;
+            let position = self.start_position + direction * t;
+
+            let mut contour_trace = ContourTrace::new(self.num_rays, position, normal, mesh);
+
             contour_trace.process(mesh)?;
             self.keypoints.extend(contour_trace.get_keypoints());
         }

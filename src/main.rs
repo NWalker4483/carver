@@ -1,8 +1,7 @@
-
 use cam_job::CAMJOB;
 use errors::CAMError;
 use stl_io::IndexedMesh;
-use kiss3d::nalgebra::Vector3;
+use kiss3d::nalgebra::{Vector3, Point3};
 use kiss3d::window::Window;
 use kiss3d::light::Light;
 use tasks::MultiContourTrace;
@@ -50,10 +49,15 @@ fn main() -> Result<()> {
         let mut cam_job = CAMJOB::new();
         cam_job.set_mesh(mesh.clone());
         // Automatically add the task for testing
-        cam_job.add_task(Box::new(MultiContourTrace::new(min_z, max_z, 20, 200, 0.1)));
+        cam_job.add_task(Box::new(MultiContourTrace::new(
+            Point3::new(0.0, 0.0, min_z),  // start_position
+            Point3::new(0.0, 0.0, max_z),  // end_position
+            20,  // num_layers
+            200,  // num_rays
+        )));
         AppState::new(mesh.clone(), cylinder, cam_job, &mut ui)
     };
-    
+
     while window.render() {
         handle_ui(&mut window, &mut app_state);
         

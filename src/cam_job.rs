@@ -5,7 +5,6 @@ use std::error::Error;
 
 use crate::errors::CAMError;
 use crate::stl_operations::get_bounds;
-use crate::tasks::multicontourtrace::MultiContourTrace;
 
 #[derive(Debug, Clone)]
 pub struct Keypoint {
