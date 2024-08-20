@@ -6,7 +6,11 @@ edition = "2018"
 
 [dependencies]
 stl_io = "0.7.0"
-kiss3d = "0.35.0"
+kiss3d = {version="0.35.0", features = ["conrod"]}
 notify = "5.1.0"
-anyhow = "1.0.69"
+thiserror="1"
 nalgebra = "0.29"
+ncollide3d = "0.33"
+anyhow = "1.0.69"
+[dev-dependencies]
+anyhow = "1.0.69"
