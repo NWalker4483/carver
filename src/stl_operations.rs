@@ -1,17 +1,16 @@
+use crate::prelude::*;
 use std::path::Path;
 use std::fs::File;
 use anyhow::Result;
-use stl_io::{self, IndexedMesh as StlMesh, Vertex};
+use stl_io::{self, IndexedMesh, Vertex};
 use kiss3d::nalgebra::Point3;
-use crate::cam_job::Keypoint;
 use crate::errors::CAMError;
-use crate::cam_job::CAMTask;
 use ncollide3d::query::{Ray, RayCast};
 use ncollide3d::shape::TriMesh;
 use ncollide3d::math::Point as NCPoint;
+use kiss3d::nalgebra::{ Vector3, Isometry3};
 
 
-pub type IndexedMesh = StlMesh;
 
 pub fn load_stl(filename: &Path) -> Result<IndexedMesh> {
     let mut file = File::open(filename)?;
@@ -30,6 +29,19 @@ pub fn indexed_mesh_to_trimesh(mesh: &IndexedMesh) -> TriMesh<f32> {
     TriMesh::new(vertices, indices, None)
 }
 
+    /// Checks if a point is inside the 3D model.
+pub fn is_point_inside_model( point: &Point3<f32>, normal: &Vector3<f32>, tri_mesh: &TriMesh<f32>) -> bool {
+        let epsilon = 1e-6;
+        let ray_start = point + normal * epsilon;
+        let ray = Ray::new(ncollide3d::math::Point::from(ray_start.coords), *normal);
+
+        let forward_hit = tri_mesh.toi_and_normal_with_ray(&Isometry3::identity(), &ray, std::f32::MAX, true);
+        let backward_ray = Ray::new(ncollide3d::math::Point::from(ray_start.coords), -normal);
+        let backward_hit = tri_mesh.toi_and_normal_with_ray(&Isometry3::identity(), &backward_ray, std::f32::MAX, true);
+
+        forward_hit.is_some() != backward_hit.is_some()
+    }
+
 pub fn center_and_scale_mesh(mesh: &mut IndexedMesh) -> (f32, f32) {
     let (min, max) = get_bounds(mesh).expect("Failed to get mesh bounds");
     let center = [
@@ -42,7 +54,7 @@ pub fn center_and_scale_mesh(mesh: &mut IndexedMesh) -> (f32, f32) {
         max.y - min.y,
         max.z - min.z,
     ];
-    let scale = 1.0 / size.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let scale = 1.0;// / size.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
 
     let min_z = min.z * scale;
     let max_z = max.z * scale;

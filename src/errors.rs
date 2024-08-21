@@ -1,9 +1,4 @@
-use kiss3d::nalgebra::{Point3, Vector3, Unit};
-use stl_io::IndexedMesh;
 use std::fmt;
-use std::error::Error;
-
-use crate::stl_operations::get_bounds;
 
 #[derive(thiserror::Error, Debug)]
 pub enum CAMError {

@@ -1,8 +1,5 @@
 use kiss3d::nalgebra::{Point3, Vector3};
-use stl_io::IndexedMesh;
-use std::fmt;
-use std::error::Error;
-
+use stl_io::{IndexedMesh, IndexedTriangle, Triangle, Vector, Vertex};
 use crate::errors::CAMError;
 use crate::stl_operations::get_bounds;
 
@@ -19,21 +16,33 @@ pub trait CAMTask {
 
 pub struct CAMJOB {
     tasks: Vec<Box<dyn CAMTask>>,
-    mesh: Option<IndexedMesh>,
+    pub target_mesh: Option<IndexedMesh>,
+    pub stock_mesh: Option<IndexedMesh>,
 }
 
 impl CAMJOB {
     pub fn new() -> Self {
         CAMJOB {
             tasks: Vec::new(),
-            mesh: None,
+            target_mesh: None,
+            stock_mesh: None,
         }
     }
 
-    pub fn set_mesh(&mut self, mesh: IndexedMesh) {
-        self.mesh = Some(mesh);
+    pub fn set_mesh(&mut self, mesh: IndexedMesh) -> Result<(), CAMError> {
+        self.target_mesh = Some(mesh);
+        self.create_stock_mesh()
     }
 
+    pub fn create_stock_mesh(&mut self) -> Result<(), CAMError> {
+        if let Some(target_mesh) = &self.target_mesh {
+            let stock_mesh = generate_stock_mesh(target_mesh)?;
+            self.stock_mesh = Some(stock_mesh);
+            Ok(())
+        } else {
+            Err(CAMError::MeshNotSet)
+        }
+    }
     pub fn add_task(&mut self, task: Box<dyn CAMTask>) {
         self.tasks.push(task);
     }
@@ -47,7 +56,7 @@ impl CAMJOB {
     }
 
     pub fn build(&mut self) -> Result<(), CAMError> {
-        if let Some(mesh) = &self.mesh {
+        if let Some(mesh) = &self.target_mesh {
             for task in &mut self.tasks {
                 task.process(mesh)?;
             }
@@ -60,4 +69,68 @@ impl CAMJOB {
     pub fn gather_keypoints(&self) -> Vec<Keypoint> {
         self.tasks.iter().flat_map(|task| task.get_keypoints()).collect()
     }
+
+
+    pub fn get_stock_mesh(&self) -> Option<&IndexedMesh> {
+        self.stock_mesh.as_ref()
+    }
+
+    pub fn get_tasks(&self) -> &Vec<Box<dyn CAMTask>> {
+        &self.tasks
+    }
+}
+
+
+
+fn generate_stock_mesh(target_mesh: &IndexedMesh) -> Result<IndexedMesh, CAMError> {
+    let (min, max) = get_bounds(target_mesh)?;
+    
+    // Add some padding to ensure the stock fully encapsulates the target
+    let padding = 0.1; // 10% padding
+    let min = Point3::new(
+        min.x - (max.x - min.x) * padding,
+        min.y - (max.y - min.y) * padding,
+        min.z - (max.z - min.z) * padding
+    );
+    let max = Point3::new(
+        max.x + (max.x - min.x) * padding,
+        max.y + (max.y - min.y) * padding,
+        max.z + (max.z - min.z) * padding
+    );
+
+    // Define the vertices of the cube
+    let vertices: Vec<Vector<f32>> = vec![
+        Vector::new([min.x, min.y, min.z]),  // 0
+        Vector::new([max.x, min.y, min.z]),  // 1
+        Vector::new([max.x, max.y, min.z]),  // 2
+        Vector::new([min.x, max.y, min.z]),  // 3
+        Vector::new([min.x, min.y, max.z]),  // 4
+        Vector::new([max.x, min.y, max.z]),  // 5
+        Vector::new([max.x, max.y, max.z]),  // 6
+        Vector::new([min.x, max.y, max.z]),  // 7
+    ];
+
+    // Define the faces using IndexedTriangle with normals
+    let faces: Vec<IndexedTriangle> = vec![
+        // Front face (normal: 0, 0, -1)
+        IndexedTriangle { normal: Vector::new([0.0, 0.0, -1.0]), vertices: [0, 1, 2] },
+        IndexedTriangle { normal: Vector::new([0.0, 0.0, -1.0]), vertices: [0, 2, 3] },
+        // Right face (normal: 1, 0, 0)
+        IndexedTriangle { normal: Vector::new([1.0, 0.0, 0.0]), vertices: [1, 5, 6] },
+        IndexedTriangle { normal: Vector::new([1.0, 0.0, 0.0]), vertices: [1, 6, 2] },
+        // Back face (normal: 0, 0, 1)
+        IndexedTriangle { normal: Vector::new([0.0, 0.0, 1.0]), vertices: [5, 4, 7] },
+        IndexedTriangle { normal: Vector::new([0.0, 0.0, 1.0]), vertices: [5, 7, 6] },
+        // Left face (normal: -1, 0, 0)
+        IndexedTriangle { normal: Vector::new([-1.0, 0.0, 0.0]), vertices: [4, 0, 3] },
+        IndexedTriangle { normal: Vector::new([-1.0, 0.0, 0.0]), vertices: [4, 3, 7] },
+        // Top face (normal: 0, 1, 0)
+        IndexedTriangle { normal: Vector::new([0.0, 1.0, 0.0]), vertices: [3, 2, 6] },
+        IndexedTriangle { normal: Vector::new([0.0, 1.0, 0.0]), vertices: [3, 6, 7] },
+        // Bottom face (normal: 0, -1, 0)
+        IndexedTriangle { normal: Vector::new([0.0, -1.0, 0.0]), vertices: [4, 5, 1] },
+        IndexedTriangle { normal: Vector::new([0.0, -1.0, 0.0]), vertices: [4, 1, 0] },
+    ];
+    
+    Ok(IndexedMesh { vertices, faces })
 }

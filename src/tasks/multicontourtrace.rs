@@ -1,9 +1,8 @@
 
-use kiss3d::nalgebra::{Point3, Vector3};
+use kiss3d::nalgebra::{Point3};
 use stl_io::IndexedMesh;
 use crate::cam_job::{CAMTask, Keypoint};
 use crate::errors::CAMError;
-use crate::stl_operations::get_bounds;
 use super::ContourTrace;
 
 pub struct MultiContourTrace {
