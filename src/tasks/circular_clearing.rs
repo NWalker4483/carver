@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use crate::cam_job::{CAMTask, Keypoint};
 use crate::errors::CAMError;
-use crate::stl_operations::{get_bounds, indexed_mesh_to_trimesh, is_point_inside_model};
+use crate::stl_operations::{indexed_mesh_to_trimesh, is_point_inside_model};
 use kiss3d::nalgebra::{Point3, Vector3, Isometry3};
 use ncollide3d::query::{Ray, RayCast};
 use ncollide3d::shape::TriMesh;
@@ -151,6 +151,9 @@ impl CircularClearing {
 }
 
 impl CAMTask for CircularClearing {
+    fn get_tool_id(&self) -> usize {
+        1 as usize
+    }
     fn process(&mut self, mesh: &IndexedMesh) -> Result<(), CAMError> {
         println!("Processing circular clearing from {:?} to {:?}", self.start_position, self.end_position);
         let tri_mesh = indexed_mesh_to_trimesh(mesh);

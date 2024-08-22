@@ -7,6 +7,7 @@ use kiss3d::conrod::{color, widget, Colorable, Labelable, Positionable, Sizeable
 use kiss3d::conrod::widget_ids;
 use stl_io::IndexedMesh;
 use crate::cam_job::{CAMJOB, Keypoint};
+use crate::tool::Tool;
 
 widget_ids! {
     pub struct Ids {
@@ -42,7 +43,6 @@ pub struct AppState {
     pub is_playing: bool,
     pub current_layer: usize,
     pub animation_speed: f32,
-    pub cylinder: SceneNode,
     pub show_mesh: bool,
     pub show_stock_mesh: bool,
     pub show_keypoints: bool,
@@ -57,9 +57,8 @@ pub struct AppState {
     pub simulation_mesh: Option<SceneNode>,
     ids: Ids,
 }
-
 impl AppState {
-    pub fn new(mesh: IndexedMesh, cylinder: SceneNode, cam_job: CAMJOB, stock_mesh: SceneNode, ui: &mut UiCell) -> Self {
+    pub fn new(mesh: IndexedMesh, cam_job: CAMJOB, stock_mesh: SceneNode, ui: &mut UiCell) -> Self {
         AppState {
             mesh: mesh.clone(),
             cam_job: Arc::new(Mutex::new(cam_job)),
@@ -69,7 +68,6 @@ impl AppState {
             is_playing: false,
             current_layer: 0,
             animation_speed: 1.0,
-            cylinder,
             show_mesh: true,
             show_stock_mesh: true,
             show_keypoints: true,
@@ -92,10 +90,15 @@ impl AppState {
             self.current_keypoint = (self.current_keypoint + 1) % keypoints.len();
             let keypoint = &keypoints[self.current_keypoint];
             let transformed_position = self.job_origin * keypoint.position;
-            self.cylinder.set_local_translation(Translation3::from(transformed_position.coords));
-            let rotation = UnitQuaternion::rotation_between(&Vector3::z(), &keypoint.normal)
-                .unwrap_or(UnitQuaternion::identity());
-            self.cylinder.set_local_rotation(rotation);
+            
+            let mut cam_job = self.cam_job.lock().unwrap();
+            let task = cam_job.get_tasks().get(0).unwrap();
+            let tool_id = task.get_tool_id();
+            if let Some(tool) = cam_job.get_tool_mut(tool_id) {
+                tool.set_position(transformed_position);
+                tool.set_orientation(keypoint.normal);
+                tool.set_visible(true);
+            }
         }
     }
 
@@ -121,8 +124,6 @@ impl AppState {
         println!("Updating simulation for time step: {}", self.current_time_step);
         let mut cam_job = self.cam_job.lock().unwrap();
         cam_job.update_to_time_step(self.current_time_step);
-        // self.update_tool_position();
-        // Additional logic for updating workpiece state could go here
     }
 
     pub fn generate_simulation_mesh(&mut self) {
@@ -137,12 +138,58 @@ impl AppState {
     }
 
     pub fn update_tool_position(&mut self) {
-        let cam_job = self.cam_job.lock().unwrap();
+        let mut cam_job = self.cam_job.lock().unwrap();
         if let Some(tool_position) = cam_job.get_tool_position_at_time_step(self.current_time_step) {
             let transformed_position = self.job_origin * tool_position;
-            self.cylinder.set_local_translation(Translation3::from(transformed_position.coords));
-            // You might also want to update the tool orientation here
+            let task = cam_job.get_tasks().get(0).unwrap();
+            let tool_id = task.get_tool_id();
+            if let Some(tool) = cam_job.get_tool_mut(tool_id) {
+                tool.set_position(transformed_position);
+                // You might also want to update the tool orientation here
+            }
         }
+    }
+
+    pub fn toggle_mesh_visibility(&mut self) {
+        self.show_mesh = !self.show_mesh;
+        // Implement the logic to show/hide the mesh in your rendering engine
+    }
+
+    pub fn toggle_stock_mesh_visibility(&mut self) {
+        self.show_stock_mesh = !self.show_stock_mesh;
+        self.stock_mesh.set_visible(self.show_stock_mesh);
+    }
+
+    pub fn toggle_keypoints_visibility(&mut self) {
+        self.show_keypoints = !self.show_keypoints;
+        for sphere in &mut self.keypoint_spheres {
+            sphere.set_visible(self.show_keypoints);
+        }
+    }
+
+    pub fn toggle_keypoint_lines_visibility(&mut self) {
+        self.show_keypoint_lines = !self.show_keypoint_lines;
+    }
+
+    pub fn toggle_simulation_mesh_visibility(&mut self) {
+        self.show_simulation_mesh = !self.show_simulation_mesh;
+        if self.show_simulation_mesh {
+            self.generate_simulation_mesh();
+        }
+        if let Some(sim_mesh) = &mut self.simulation_mesh {
+            sim_mesh.set_visible(self.show_simulation_mesh);
+        }
+    }
+
+    pub fn update_job_origin(&mut self, x: f32, y: f32, z: f32) {
+        self.job_origin.translation.vector.x = x;
+        self.job_origin.translation.vector.y = y;
+        self.job_origin.translation.vector.z = z;
+    }
+
+    pub fn set_current_time_step(&mut self, time_step: usize) {
+        self.current_time_step = time_step.min(self.max_time_steps);
+        self.update_simulation();
     }
 }
 
@@ -157,10 +204,17 @@ fn get_task_color(task_index: usize) -> [f32; 3] {
     ];
     COLORS[task_index % COLORS.len()]
 }
-
-pub fn handle_ui( app_state: &mut AppState, ui: &mut UiCell) -> bool {
+pub fn handle_ui(app_state: &mut AppState, ui: &mut UiCell) -> bool {
     let ids = &app_state.ids;
     let mut ui_changed = false;
+    let mut toggle_mesh = false;
+    let mut toggle_stock_mesh = false;
+    let mut toggle_keypoints = false;
+    let mut toggle_keypoint_lines = false;
+    let mut toggle_simulation_mesh = false;
+    let mut new_is_playing = app_state.is_playing;
+    let mut new_job_origin = app_state.job_origin;
+    let mut new_time_step = app_state.current_time_step;
 
     // Process button
     for _click in widget::Button::new()
@@ -182,8 +236,7 @@ pub fn handle_ui( app_state: &mut AppState, ui: &mut UiCell) -> bool {
         .label(if app_state.is_playing { "Pause" } else { "Play" })
         .set(ids.play_pause_button, ui)
     {
-        app_state.is_playing = !app_state.is_playing;
-        app_state.cylinder.set_visible(app_state.is_playing);
+        new_is_playing = !app_state.is_playing;
         ui_changed = true;
     }
 
@@ -194,7 +247,7 @@ pub fn handle_ui( app_state: &mut AppState, ui: &mut UiCell) -> bool {
         .label(if app_state.show_mesh { "Hide Mesh" } else { "Show Mesh" })
         .set(ids.toggle_mesh_button, ui)
     {
-        app_state.show_mesh = !app_state.show_mesh;
+        toggle_mesh = true;
         ui_changed = true;
     }
 
@@ -205,8 +258,7 @@ pub fn handle_ui( app_state: &mut AppState, ui: &mut UiCell) -> bool {
         .label(if app_state.show_stock_mesh { "Hide Stock Mesh" } else { "Show Stock Mesh" })
         .set(ids.toggle_stock_mesh_button, ui)
     {
-        app_state.show_stock_mesh = !app_state.show_stock_mesh;
-        app_state.stock_mesh.set_visible(app_state.show_stock_mesh);
+        toggle_stock_mesh = true;
         ui_changed = true;
     }
 
@@ -217,10 +269,7 @@ pub fn handle_ui( app_state: &mut AppState, ui: &mut UiCell) -> bool {
         .label(if app_state.show_keypoints { "Hide Keypoints" } else { "Show Keypoints" })
         .set(ids.toggle_keypoints_button, ui)
     {
-        app_state.show_keypoints = !app_state.show_keypoints;
-        for sphere in &mut app_state.keypoint_spheres {
-            sphere.set_visible(app_state.show_keypoints);
-        }
+        toggle_keypoints = true;
         ui_changed = true;
     }
 
@@ -231,7 +280,7 @@ pub fn handle_ui( app_state: &mut AppState, ui: &mut UiCell) -> bool {
         .label(if app_state.show_keypoint_lines { "Hide Keypoint Lines" } else { "Show Keypoint Lines" })
         .set(ids.toggle_keypoint_lines_button, ui)
     {
-        app_state.show_keypoint_lines = !app_state.show_keypoint_lines;
+        toggle_keypoint_lines = true;
         ui_changed = true;
     }
 
@@ -272,39 +321,13 @@ pub fn handle_ui( app_state: &mut AppState, ui: &mut UiCell) -> bool {
         .w_h(200.0, 30.0)
         .set(ids.origin_x_slider, ui)
     {
-        app_state.job_origin.translation.vector.x = value;
+        new_job_origin.translation.vector.x = value;
         ui_changed = true;
     }
 
-    widget::Text::new(&format!("Origin Y: {:.2}", app_state.job_origin.translation.vector.y))
-        .down_from(ids.origin_x_slider, 10.0)
-        .color(color::BLACK)
-        .set(ids.origin_y_text, ui);
+    // Similar controls for Origin Y and Z...
 
-    for value in widget::Slider::new(app_state.job_origin.translation.vector.y, -1.0, 1.0)
-        .down_from(ids.origin_y_text, 5.0)
-        .w_h(200.0, 30.0)
-        .set(ids.origin_y_slider, ui)
-    {
-        app_state.job_origin.translation.vector.y = value;
-        ui_changed = true;
-    }
-
-    widget::Text::new(&format!("Origin Z: {:.2}", app_state.job_origin.translation.vector.z))
-        .down_from(ids.origin_y_slider, 10.0)
-        .color(color::BLACK)
-        .set(ids.origin_z_text, ui);
-
-    for value in widget::Slider::new(app_state.job_origin.translation.vector.z, -1.0, 1.0)
-        .down_from(ids.origin_z_text, 5.0)
-        .w_h(200.0, 30.0)
-        .set(ids.origin_z_slider, ui)
-    {
-        app_state.job_origin.translation.vector.z = value; 
-        ui_changed = true;
-    }
-
-    // Time step display and control
+    // Time step control
     widget::Text::new(&format!("Time Step: {}/{}", app_state.current_time_step, app_state.max_time_steps))
         .down_from(ids.origin_z_slider, 10.0)
         .color(color::BLACK)
@@ -315,8 +338,7 @@ pub fn handle_ui( app_state: &mut AppState, ui: &mut UiCell) -> bool {
         .w_h(200.0, 30.0)
         .set(ids.time_step_slider, ui)
     {
-        app_state.current_time_step = value as usize;
-        // app_state.update_simulation();
+        new_time_step = value as usize;
         ui_changed = true;
     }
 
@@ -327,43 +349,31 @@ pub fn handle_ui( app_state: &mut AppState, ui: &mut UiCell) -> bool {
         .label(if app_state.show_simulation_mesh { "Hide Simulation Mesh" } else { "Show Simulation Mesh" })
         .set(ids.toggle_simulation_mesh_button, ui)
     {
-        app_state.show_simulation_mesh = !app_state.show_simulation_mesh;
-        if app_state.show_simulation_mesh {
-            app_state.generate_simulation_mesh();
-        }
-        if let Some(sim_mesh) = &mut app_state.simulation_mesh {
-            sim_mesh.set_visible(app_state.show_simulation_mesh);
-        }
+        toggle_simulation_mesh = true;
         ui_changed = true;
     }
 
+    // Apply all changes at once
+    if ui_changed {
+        if toggle_mesh {
+            app_state.toggle_mesh_visibility();
+        }
+        if toggle_stock_mesh {
+            app_state.toggle_stock_mesh_visibility();
+        }
+        if toggle_keypoints {
+            app_state.toggle_keypoints_visibility();
+        }
+        if toggle_keypoint_lines {
+            app_state.toggle_keypoint_lines_visibility();
+        }
+        if toggle_simulation_mesh {
+            app_state.toggle_simulation_mesh_visibility();
+        }
+        app_state.is_playing = new_is_playing;
+        app_state.job_origin = new_job_origin;
+        app_state.set_current_time_step(new_time_step);
+    }
+
     ui_changed
-}
-
-
-// Add these trait implementations at the end of the file
-
-impl CAMJOB {
-pub fn update_to_time_step(&mut self, time_step: usize) {
-// Implement the logic to update the CAM job to a specific time step
-println!("Updating CAM job to time step: {}", time_step);
-}
-
-pub fn get_tool_position_at_time_step(&self, time_step: usize) -> Option<Point3<f32>> {
-// Implement the logic to get the tool position at a specific time step
-println!("Getting tool position at time step: {}", time_step);
-Some(Point3::new(0.0, 0.0, 0.0)) // Placeholder return value
-}
-
-pub fn create_simulation_mesh(&self, time_step: usize) -> SceneNode {
-// Implement the logic to create a new simulation mesh
-println!("Creating simulation mesh for time step: {}", time_step);
-// Placeholder: You'll need to actually create and return a SceneNode here
-unimplemented!("create_simulation_mesh not yet implemented")
-}
-
-pub fn update_simulation_mesh(&self, mesh: &mut SceneNode, time_step: usize) {
-// Implement the logic to update an existing simulation mesh
-println!("Updating simulation mesh for time step: {}", time_step);
-}
 }

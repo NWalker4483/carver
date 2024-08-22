@@ -31,6 +31,9 @@ impl MultiContourTrace {
 }
 
 impl CAMTask for MultiContourTrace {
+    fn get_tool_id(&self) -> usize {
+        1 as usize
+    }
     fn process(&mut self, mesh: &IndexedMesh) -> Result<(), CAMError> {
         println!("Processing multi-contour trace from {:?} to {:?} with {} layers",
                  self.start_position, self.end_position, self.num_layers);

@@ -46,6 +46,9 @@ impl ContourTrace {
 }
 
 impl CAMTask for ContourTrace {
+    fn get_tool_id(&self) -> usize {
+        1 as usize
+    }
     fn process(&mut self, mesh: &IndexedMesh) -> Result<(), CAMError> {
         println!("Processing contour trace at position: {:?}, normal: {:?}", self.position, self.normal);
         let tri_mesh = indexed_mesh_to_trimesh(mesh);
